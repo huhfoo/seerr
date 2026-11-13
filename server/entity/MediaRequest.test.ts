@@ -23,6 +23,8 @@ const externalApiGetMock = mock.method(
   },
   'get',
   async (endpoint: string) => {
+    const episodeIds = endpoint.match(/\/episode\/(\d+)\/external_ids$/);
+    if (episodeIds) return { tvdb_id: 1000 + Number(episodeIds[1]) };
     const episodeSeason = endpoint.match(/^\/tv\/(\d+)\/season\/(\d+)$/);
     if (episodeSeason)
       return {
@@ -230,8 +232,12 @@ describe('episode selections', () => {
       },
       requester
     );
-    assert.deepEqual(pilot.episodes, [{ seasonNumber: 1, episodeNumber: 1 }]);
-    assert.deepEqual(second.episodes, [{ seasonNumber: 1, episodeNumber: 2 }]);
+    assert.deepEqual(pilot.episodes, [
+      { seasonNumber: 1, episodeNumber: 1, tvdbId: 1001 },
+    ]);
+    assert.deepEqual(second.episodes, [
+      { seasonNumber: 1, episodeNumber: 2, tvdbId: 1002 },
+    ]);
     const stored = await getRepository(MediaRequest).findOneByOrFail({
       id: pilot.id,
     });
@@ -335,4 +341,88 @@ describe('episode selections', () => {
     );
     assert.equal(await getRepository(MediaRequest).count(), 0);
   });
+});
+
+describe('episode season quotas', () => {
+  it('charges a season once across episode and whole-season requests, even at the quota limit', async () => {
+    const requester = await seedRequester(5);
+    requester.tvQuotaLimit = 1;
+    await getRepository(User).save(requester);
+    const episode = (episodeNumber: number, seasonNumber = 1) =>
+      MediaRequest.request(
+        {
+          mediaType: MediaType.TV,
+          mediaId: 8888,
+          episodes: [{ seasonNumber, episodeNumber }],
+        },
+        requester
+      );
+    await episode(1);
+    await episode(2);
+    assert.equal((await requester.getQuota()).tv.used, 1);
+    await assert.rejects(() => episode(1, 2), QuotaRestrictedError);
+    await MediaRequest.request(
+      { mediaType: MediaType.TV, mediaId: 8888, seasons: [1] },
+      requester
+    );
+    assert.equal((await requester.getQuota()).tv.used, 1);
+    await assert.rejects(
+      () =>
+        MediaRequest.request(
+          {
+            mediaType: MediaType.TV,
+            mediaId: 9999,
+            seasons: [1],
+          },
+          requester
+        ),
+      QuotaRestrictedError
+    );
+  });
+
+  it('does not trust client-supplied episode identities', async () => {
+    const requester = await seedRequester(5);
+    const request = await MediaRequest.request(
+      {
+        mediaType: MediaType.TV,
+        mediaId: 8888,
+        episodes: [
+          { seasonNumber: 1, episodeNumber: 1, tvdbId: 999 } as {
+            seasonNumber: number;
+            episodeNumber: number;
+          },
+        ],
+      },
+      requester
+    );
+    assert.equal(request.episodes?.[0].tvdbId, 1001);
+  });
+});
+
+it('rejects unmapped episodes before creating a request', async () => {
+  const requester = await seedRequester(5);
+  externalApiGetMock.mockImplementation(async (endpoint: string) => {
+    if (endpoint.endsWith('/external_ids')) return { tvdb_id: null };
+    if (endpoint.endsWith('/season/1'))
+      return { episodes: [{ episode_number: 1 }] };
+    return {
+      id: 8888,
+      external_ids: {},
+      seasons: [{ season_number: 1 }],
+      videos: { results: [{ type: 'Trailer' }] },
+    };
+  });
+  await assert.rejects(
+    () =>
+      MediaRequest.request(
+        {
+          mediaType: MediaType.TV,
+          mediaId: 8888,
+          episodes: [{ seasonNumber: 1, episodeNumber: 1 }],
+        },
+        requester
+      ),
+    /no TVDB mapping/
+  );
+  assert.equal(await getRepository(MediaRequest).count(), 0);
 });

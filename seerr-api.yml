@@ -2210,6 +2210,8 @@ paths:
                 rootFolder: { type: string }
                 languageProfileId: { type: integer, minimum: 1 }
                 tvdbId: { type: integer, minimum: 1 }
+                seasonNumber: { type: integer, minimum: 0 }
+                episodeNumber: { type: integer, minimum: 1 }
       responses:
         '200':
           {
@@ -2228,6 +2230,13 @@ paths:
         - in: query
           name: is4k
           schema: { type: string, enum: ['true', 'false'] }
+        - in: query
+          name: seasonNumber
+          description: TMDB season number; supply together with episodeNumber to resolve a single episode by TVDB identity.
+          schema: { type: integer, minimum: 0 }
+        - in: query
+          name: episodeNumber
+          schema: { type: integer, minimum: 1 }
       responses:
         '200': { description: Sonarr episodes }
   /media/{id}/releases:
@@ -4848,6 +4857,10 @@ paths:
                       used:
                         type: number
                         example: 6
+                      seasonKeys:
+                        type: array
+                        description: TV seasons charged during this quota period, formatted as TMDB ID, boolean 4K flag, and season number separated by colons.
+                        items: { type: string }
                       remaining:
                         type: number
                         example: 4

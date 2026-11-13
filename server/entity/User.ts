@@ -27,7 +27,6 @@ import {
 } from 'typeorm';
 import Issue from './Issue';
 import { MediaRequest } from './MediaRequest';
-import SeasonRequest from './SeasonRequest';
 import { UserPushSubscription } from './UserPushSubscription';
 import { UserSettings } from './UserSettings';
 
@@ -282,6 +281,43 @@ export class User {
       this.username || this.plexUsername || this.jellyfinUsername || this.email;
   }
 
+  public async getTvQuotaSeasonKeys(
+    excludeRequestId?: number
+  ): Promise<Set<string>> {
+    const days =
+      this.tvQuotaDays ?? getSettings().main.defaultQuotas.tv.quotaDays;
+    const since = new Date();
+    since.setDate(since.getDate() - (days ?? 0));
+    const query = getRepository(MediaRequest)
+      .createQueryBuilder('request')
+      .innerJoin('request.media', 'media')
+      .innerJoin('request.seasons', 'season')
+      .select('media.tmdbId', 'tmdbId')
+      .addSelect('request.is4k', 'is4k')
+      .addSelect('season.seasonNumber', 'seasonNumber')
+      .distinct(true)
+      .where('request.requestedById = :userId', { userId: this.id })
+      .andWhere('request.type = :type', { type: MediaType.TV })
+      .andWhere('request.status != :declined', {
+        declined: MediaRequestStatus.DECLINED,
+      })
+      .andWhere('request.ignoreQuota = :ignored', { ignored: false });
+    if (excludeRequestId !== undefined)
+      query.andWhere('request.id != :excludeRequestId', { excludeRequestId });
+    if (days)
+      query.andWhere('request.createdAt > :since', { since: since.toJSON() });
+    const seasons = await query.getRawMany<{
+      tmdbId: number;
+      is4k: boolean | number;
+      seasonNumber: number;
+    }>();
+    return new Set(
+      seasons.map(
+        (season) => `${season.tmdbId}:${!!season.is4k}:${season.seasonNumber}`
+      )
+    );
+  }
+
   public async getQuota(): Promise<QuotaResponse> {
     const {
       main: { defaultQuotas },
@@ -321,47 +357,10 @@ export class User {
       : 0;
     const tvQuotaDays = this.tvQuotaDays ?? defaultQuotas.tv.quotaDays;
 
-    // Count tv season requests made during quota period
-    const tvDate = new Date();
-    if (tvQuotaDays) {
-      tvDate.setDate(tvDate.getDate() - tvQuotaDays);
-    }
-    const tvQuotaStartDate = tvDate.toJSON();
-    const tvQuotaUsedQuery = requestRepository
-      .createQueryBuilder('request')
-      .leftJoin('request.requestedBy', 'requestedBy')
-      .where('request.type = :requestType', {
-        requestType: MediaType.TV,
-      })
-      .andWhere('requestedBy.id = :userId', {
-        userId: this.id,
-      })
-      .andWhere('request.status != :declinedStatus', {
-        declinedStatus: MediaRequestStatus.DECLINED,
-      });
-
-    if (tvQuotaDays) {
-      tvQuotaUsedQuery.andWhere('request.createdAt > :date', {
-        date: tvQuotaStartDate,
-      });
-    }
-
-    const tvQuotaUsed = tvQuotaLimit
-      ? (
-          await tvQuotaUsedQuery
-            .andWhere('request.ignoreQuota = :ignoreQuota', {
-              ignoreQuota: false,
-            })
-            .addSelect((subQuery) => {
-              return subQuery
-                .select('COUNT(season.id)', 'seasonCount')
-                .from(SeasonRequest, 'season')
-                .leftJoin('season.request', 'parentRequest')
-                .where('parentRequest.id = request.id');
-            }, 'seasonCount')
-            .getMany()
-        ).reduce((sum: number, req: MediaRequest) => sum + req.seasonCount, 0)
-      : 0;
+    const tvQuotaSeasonKeys = tvQuotaLimit
+      ? await this.getTvQuotaSeasonKeys()
+      : new Set<string>();
+    const tvQuotaUsed = tvQuotaSeasonKeys.size;
 
     return {
       movie: {
@@ -376,6 +375,7 @@ export class User {
         ),
       },
       tv: {
+        seasonKeys: [...tvQuotaSeasonKeys],
         days: tvQuotaDays,
         limit: tvQuotaLimit,
         used: tvQuotaUsed,

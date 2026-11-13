@@ -12,6 +12,8 @@ export interface UserRequestsResponse extends PaginatedResponse {
 }
 
 export interface QuotaStatus {
+  /** TV seasons already charged this period: TMDB ID, 4K flag, season number. */
+  seasonKeys?: string[];
   days?: number;
   limit?: number;
   used: number;

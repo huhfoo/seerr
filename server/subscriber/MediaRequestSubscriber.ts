@@ -764,6 +764,20 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           }
         }
 
+        // Resolve legacy requests created before episode identities were stored.
+        const episodes = entity.episodes
+          ? await Promise.all(
+              entity.episodes.map(async (episode) => ({
+                ...episode,
+                tvdbId:
+                  episode.tvdbId ??
+                  (await tmdb.getTvEpisodeTvdbId({
+                    tvId: media.tmdbId,
+                    ...episode,
+                  })),
+              }))
+            )
+          : undefined;
         const sonarrSeriesOptions: AddSeriesOptions = {
           profileId: qualityProfile,
           languageProfileId: languageProfile,
@@ -771,7 +785,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           title: series.name,
           tvdbid: tvdbId,
           seasons: entity.seasons.map((season) => season.seasonNumber),
-          episodes: entity.episodes ?? undefined,
+          episodes,
           seasonFolder: sonarrSettings.enableSeasonFolders,
           seriesType,
           tags,

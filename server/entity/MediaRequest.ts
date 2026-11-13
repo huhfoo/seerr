@@ -166,11 +166,6 @@ export class MediaRequest {
         quotas.movie.restricted
       ) {
         throw new QuotaRestrictedError('Movie Quota exceeded.');
-      } else if (
-        requestBody.mediaType === MediaType.TV &&
-        quotas.tv.restricted
-      ) {
-        throw new QuotaRestrictedError('Series Quota exceeded.');
       }
     }
 
@@ -403,7 +398,14 @@ export class MediaRequest {
         requestedSeasons = requestedSeasons.filter((sn) => sn > 0);
       }
 
-      const selectedEpisodes = requestBody.episodes;
+      // Resolve identities server-side; clients cannot supply trusted TVDB IDs.
+      const selectedEpisodes = requestBody.episodes?.map(
+        ({ seasonNumber, episodeNumber }) => ({
+          seasonNumber,
+          episodeNumber,
+          tvdbId: undefined as number | undefined,
+        })
+      );
       if (selectedEpisodes) {
         if (!selectedEpisodes.length || selectedEpisodes.length > 500) {
           throw new RequestPermissionError(
@@ -435,6 +437,21 @@ export class MediaRequest {
             )
           ) {
             throw new RequestPermissionError('Unknown episode selected.');
+          }
+        }
+      }
+
+      if (selectedEpisodes) {
+        for (const episode of selectedEpisodes) {
+          try {
+            episode.tvdbId = await tmdb.getTvEpisodeTvdbId({
+              tvId: requestBody.mediaId,
+              ...episode,
+            });
+          } catch (error) {
+            throw new RequestPermissionError(
+              `Unable to resolve episode identity: ${error.message}`
+            );
           }
         }
       }
@@ -505,12 +522,22 @@ export class MediaRequest {
         (rs) => !existingSeasons.includes(rs)
       );
 
+      const chargedSeasons =
+        !ignoreQuota && quotas.tv.limit
+          ? await requestUser.getTvQuotaSeasonKeys()
+          : new Set<string>();
+      const additionalSeasons = finalSeasons.filter(
+        (sn) =>
+          !chargedSeasons.has(
+            `${requestBody.mediaId}:${!!requestBody.is4k}:${sn}`
+          )
+      ).length;
       if (finalSeasons.length === 0) {
         throw new NoSeasonsAvailableError('No seasons available to request');
       } else if (
         !ignoreQuota &&
         quotas.tv.limit &&
-        finalSeasons.length > (quotas.tv.remaining ?? 0)
+        additionalSeasons > (quotas.tv.remaining ?? 0)
       ) {
         throw new QuotaRestrictedError('Series Quota exceeded.');
       }
@@ -634,7 +661,9 @@ export class MediaRequest {
   public manualSearch: boolean;
 
   @Column({ type: 'simple-json', nullable: true })
-  public episodes?: { seasonNumber: number; episodeNumber: number }[] | null;
+  public episodes?:
+    | { seasonNumber: number; episodeNumber: number; tvdbId?: number }[]
+    | null;
 
   @RelationCount((request: MediaRequest) => request.seasons)
   public seasonCount: number;

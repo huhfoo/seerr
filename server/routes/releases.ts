@@ -5,6 +5,7 @@ import { ANIME_KEYWORD_ID } from '@server/api/themoviedb/constants';
 import { MediaStatus, MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
+import overrideRules from '@server/lib/overrideRules';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -16,6 +17,34 @@ import requestLock, {
 } from '@server/utils/requestLock';
 import type { RequestHandler } from 'express';
 import { Router } from 'express';
+
+// The season/episode coordinates here are TMDB coordinates. Match Sonarr by
+// external identity and retain TMDB coordinates for the episode action's display.
+async function selectEpisode(
+  episodes: Awaited<ReturnType<SonarrAPI['getEpisodes']>>,
+  tvId: number,
+  season: unknown,
+  episode: unknown
+) {
+  if (season === undefined && episode === undefined) return episodes;
+  const seasonNumber = Number(season);
+  const episodeNumber = Number(episode);
+  if (
+    !Number.isInteger(seasonNumber) ||
+    seasonNumber < 0 ||
+    !Number.isInteger(episodeNumber) ||
+    episodeNumber < 1
+  ) {
+    throw Object.assign(new Error('Select a valid episode.'), { status: 400 });
+  }
+  const tvdbId = await new TheMovieDb().getTvEpisodeTvdbId({
+    tvId,
+    seasonNumber,
+    episodeNumber,
+  });
+  const match = episodes.find((item) => item.tvdbId === tvdbId);
+  return match ? [{ ...match, seasonNumber, episodeNumber }] : [];
+}
 
 const releaseRoutes = Router();
 
@@ -73,14 +102,23 @@ releaseRoutes.post(
               const anime = tv.keywords.results.some(
                 (keyword) => keyword.id === ANIME_KEYWORD_ID
               );
+              const overrides = await overrideRules({
+                mediaType: MediaType.TV,
+                is4k,
+                serviceId: server.id,
+                tmdbMedia: tv,
+                requestUser: req.user!,
+              });
               const profileId =
                 req.body.profileId ??
+                overrides.profileId ??
                 (anime ? server.activeAnimeProfileId : undefined) ??
                 server.activeProfileId;
               const folder =
-                req.body.rootFolder ??
-                ((anime ? server.activeAnimeDirectory : undefined) ||
-                  server.activeDirectory);
+                req.body.rootFolder ||
+                overrides.rootFolder ||
+                (anime ? server.activeAnimeDirectory : undefined) ||
+                server.activeDirectory;
               const [profiles, folders] = await Promise.all([
                 api.getProfiles(),
                 api.getRootFolders(),
@@ -102,14 +140,17 @@ releaseRoutes.post(
                 profileId,
                 rootFolderPath: folder,
                 languageProfileId:
-                  req.body.languageProfileId ?? server.activeLanguageProfileId,
+                  req.body.languageProfileId ??
+                  (anime ? server.activeAnimeLanguageProfileId : undefined) ??
+                  server.activeLanguageProfileId,
                 seriesType: anime ? server.animeSeriesType : server.seriesType,
                 seasons: [],
                 seasonFolder: server.enableSeasonFolders,
                 monitored: false,
                 monitorNewItems: 'none',
                 searchNow: false,
-                tags: server.tags,
+                tags:
+                  overrides.tags ?? (anime ? server.animeTags : server.tags),
               });
             }
             if (!series.id)
@@ -136,9 +177,15 @@ releaseRoutes.post(
             media[is4k ? 'externalServiceSlug4k' : 'externalServiceSlug'] =
               series.titleSlug;
             await repository.save(media);
+            const displayEpisodes = await selectEpisode(
+              episodes,
+              tv.id,
+              req.body.seasonNumber,
+              req.body.episodeNumber
+            );
             return {
               mediaId: media.id,
-              episodes: episodes.map(
+              episodes: displayEpisodes.map(
                 ({
                   id,
                   seasonNumber,
@@ -200,7 +247,12 @@ releaseRoutes.get(
         apiKey: server.apiKey,
         url: SonarrAPI.buildUrl(server, '/api/v3'),
       });
-      const episodes = await api.getEpisodes(seriesId);
+      const episodes = await selectEpisode(
+        await api.getEpisodes(seriesId),
+        media.tmdbId,
+        req.query.seasonNumber,
+        req.query.episodeNumber
+      );
       return res.json(
         episodes.map(
           ({ id, seasonNumber, episodeNumber, title, hasFile, monitored }) => ({

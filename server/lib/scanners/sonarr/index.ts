@@ -264,6 +264,16 @@ class SonarrScanner
               request.media[server4k ? 'serviceId4k' : 'serviceId']) == null &&
               this.currentServer.isDefault))
       );
+      // Resolve legacy selections before deriving season processing state as
+      // Sonarr may put the same episode under a different season number.
+      for (const request of episodeRequests) {
+        for (const selection of request.episodes!) {
+          selection.tvdbId ??= await this.tmdb.getTvEpisodeTvdbId({
+            tvId: tmdbId,
+            ...selection,
+          });
+        }
+      }
       const selectedEpisodeState =
         episodeRequests.length && sonarrSeries.id
           ? await this.sonarrApi.getEpisodes(sonarrSeries.id)
@@ -280,11 +290,17 @@ class SonarrScanner
           processing:
             totalAvailableEpisodes === 0 &&
             (season.monitored ||
-              selectedEpisodeState.some(
-                (ep) =>
-                  ep.seasonNumber === season.seasonNumber &&
-                  ep.monitored &&
-                  !ep.hasFile
+              episodeRequests.some((request) =>
+                request.episodes!.some(
+                  (selection) =>
+                    selection.seasonNumber === season.seasonNumber &&
+                    selectedEpisodeState.some(
+                      (ep) =>
+                        ep.tvdbId === selection.tvdbId &&
+                        ep.monitored &&
+                        !ep.hasFile
+                    )
+                )
               )),
           is4kOverride: server4k,
         });
@@ -317,10 +333,7 @@ class SonarrScanner
         for (const request of episodeRequests) {
           const ready = request.episodes!.every((selection) =>
             selectedEpisodeState.some(
-              (ep) =>
-                ep.seasonNumber === selection.seasonNumber &&
-                ep.episodeNumber === selection.episodeNumber &&
-                ep.hasFile
+              (ep) => ep.tvdbId === selection.tvdbId && ep.hasFile
             )
           );
           if (ready) {

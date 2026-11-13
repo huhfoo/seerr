@@ -26,7 +26,7 @@ describe('TV Details', () => {
     cy.contains('Chapter Nine').should('be.visible');
   });
 
-  it('allows requesting a season partially downloaded directly in Sonarr', () => {
+  it('allows requesting the rest of a partially available season already charged to quota', () => {
     cy.loginAsAdmin();
     cy.request('/api/v1/tv/66732').then(({ body }) => {
       cy.intercept('GET', '/api/v1/tv/66732', {
@@ -48,6 +48,16 @@ describe('TV Details', () => {
           ],
         },
       }).as('partialSeries');
+    });
+    cy.intercept('GET', '/api/v1/user/*/quota', {
+      movie: { limit: 0, used: 0, restricted: false },
+      tv: {
+        limit: 1,
+        used: 1,
+        remaining: 0,
+        restricted: true,
+        seasonKeys: ['66732:false:1'],
+      },
     });
     // No real request or download is submitted by this test.
     cy.intercept('POST', '/api/v1/request', {

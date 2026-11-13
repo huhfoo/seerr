@@ -75,10 +75,10 @@ const EpisodeActions = ({ tv, seasonNumber, episodeNumber }: Props) => {
   const canSearch = hasPermission(Permission.MANAGE_REQUESTS);
   const media = tv.mediaInfo;
   const linked = is4k ? media?.externalServiceId4k : media?.externalServiceId;
+  const episodeQuery = `is4k=${is4k}&seasonNumber=${seasonNumber}&episodeNumber=${episodeNumber}`;
+  const libraryUrl = `/api/v1/media/${media?.id}/episodes?${episodeQuery}`;
   const { data: libraryEpisodes } = useSWR<ReleaseEpisode[]>(
-    canSearch && linked
-      ? `/api/v1/media/${media?.id}/episodes?is4k=${is4k}`
-      : null
+    canSearch && linked ? libraryUrl : null
   );
   const {
     data: prepared,
@@ -86,12 +86,14 @@ const EpisodeActions = ({ tv, seasonNumber, episodeNumber }: Props) => {
     isLoading: preparing,
     mutate: retry,
   } = useSWR<PreparedSeriesResponse>(
-    open ? [`/api/v1/tv/${tv.id}/prepare`, is4k] : null,
+    open
+      ? [`/api/v1/tv/${tv.id}/prepare`, is4k, seasonNumber, episodeNumber]
+      : null,
     ([url, quality]: [string, boolean]) =>
       axios
         .post<PreparedSeriesResponse>(
           url,
-          { is4k: quality },
+          { is4k: quality, seasonNumber, episodeNumber },
           { timeout: 90000 }
         )
         .then((response) => response.data),
@@ -181,7 +183,7 @@ const EpisodeActions = ({ tv, seasonNumber, episodeNumber }: Props) => {
       mutate('/api/v1/request/count');
       mutate('/api/v1/request?filter=all&take=10&sort=modified&skip=0');
       if (user) mutate(`/api/v1/user/${user.id}/quota`);
-      if (media) mutate(`/api/v1/media/${media.id}/episodes?is4k=${is4k}`);
+      if (media) mutate(libraryUrl);
     }
   };
 

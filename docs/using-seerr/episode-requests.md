@@ -12,6 +12,10 @@ Release**. Rejected releases remain visible but cannot be submitted. Sonarr's
 ordering, scores, and matched-format tooltips are preserved. Seerr does not sort
 releases by custom-format score alone. Thumbnails remain artwork.
 
+Preview creation applies the same request override rules and anime defaults as
+normal requests. Activating an unmonitored preview restores the request's
+future-season monitoring policy.
+
 Search and submission errors appear inline. If the request was saved but grabbing
 the release failed, the error explains that the request remains saved. Select a
 release and try again; the existing request API prevents duplicate active episode
@@ -24,10 +28,14 @@ view. Pending episode requests can still be viewed, approved, or canceled throug
 the existing request controls; their episode selections cannot be changed into
 whole-season requests.
 
-Quotas count distinct seasons in each request. Episode requests monitor and search
+Quotas count each title, quality tier, and season once per user within the quota
+period. Additional episode requests for a season already counted, including a
+later whole-season request, do not use another quota unit. Episode requests monitor and search
 only the selected episodes. Newly added series start with other episodes and
 future seasons unmonitored. Existing Sonarr monitoring is preserved, so other
-episodes already monitored there can continue to download. Enable Sonarr
+episodes already monitored there can continue to download. Episodes are matched to Sonarr by their TVDB episode IDs, so differing TMDB and
+Sonarr numbering does not select a different episode. An episode without a TVDB
+mapping cannot be requested until its metadata is corrected. Enable Sonarr
 synchronization to complete a request when all its selected episodes have files.
 Episode-only requests do not reserve the whole season; a partially available
 season can still be requested.

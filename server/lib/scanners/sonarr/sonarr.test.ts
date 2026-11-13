@@ -142,6 +142,8 @@ for (const method of ['getTvShow', 'getTvShowForScan'] as const) {
 mock.method(MediaRequest, 'sendNotification', async () => undefined);
 
 setupTestDb();
+TheMovieDb.prototype.getTvEpisodeTvdbId = async ({ episodeNumber }) =>
+  1000 + episodeNumber;
 
 function fakeSonarrSeries(overrides: Partial<SonarrSeries> = {}): SonarrSeries {
   return {
@@ -1459,7 +1461,7 @@ describe('Sonarr Scanner', () => {
 });
 
 describe('episode request completion', () => {
-  it('completes a pilot request while leaving the season partially available', async () => {
+  it('completes a pilot request by identity despite different Sonarr numbering', async () => {
     const request = await seedShowRequest(
       9100,
       100,
@@ -1478,8 +1480,20 @@ describe('episode request completion', () => {
       SonarrAPI.prototype,
       'getEpisodes',
       async () => [
-        { id: 1, seasonNumber: 1, episodeNumber: 1, hasFile: true },
-        { id: 2, seasonNumber: 1, episodeNumber: 2, hasFile: false },
+        {
+          id: 1,
+          seasonNumber: 2,
+          episodeNumber: 5,
+          tvdbId: 1001,
+          hasFile: true,
+        },
+        {
+          id: 2,
+          seasonNumber: 1,
+          episodeNumber: 2,
+          tvdbId: 1002,
+          hasFile: false,
+        },
       ]
     );
     try {
@@ -1517,8 +1531,20 @@ describe('episode request completion', () => {
       SonarrAPI.prototype,
       'getEpisodes',
       async () => [
-        { id: 1, seasonNumber: 1, episodeNumber: 1, hasFile: true },
-        { id: 2, seasonNumber: 1, episodeNumber: 2, hasFile: false },
+        {
+          id: 1,
+          seasonNumber: 2,
+          episodeNumber: 5,
+          tvdbId: 1001,
+          hasFile: true,
+        },
+        {
+          id: 2,
+          seasonNumber: 1,
+          episodeNumber: 2,
+          tvdbId: 1002,
+          hasFile: false,
+        },
       ]
     );
     try {
@@ -1551,8 +1577,9 @@ it('preserves an episode request while its individually monitored pilot is still
   const episodes = mock.method(SonarrAPI.prototype, 'getEpisodes', async () => [
     {
       id: 1,
-      seasonNumber: 1,
-      episodeNumber: 1,
+      seasonNumber: 2,
+      episodeNumber: 5,
+      tvdbId: 1001,
       hasFile: false,
       monitored: true,
     },

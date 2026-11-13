@@ -100,10 +100,11 @@ const TvRequestModal = ({
       : null
   );
 
+  const seasonCost = (seasonNumber: number) =>
+    quota?.tv.seasonKeys?.includes(`${tmdbId}:${is4k}:${seasonNumber}`) ? 0 : 1;
   const currentlyRemaining =
     (quota?.tv.remaining ?? 0) -
-    selectedSeasons.length +
-    (editRequest?.seasons ?? []).length;
+    selectedSeasons.reduce((sum, sn) => sum + seasonCost(sn), 0);
 
   const updateRequest = async (alsoApproveRequest = false, cancel = false) => {
     if (!editRequest) {
@@ -310,10 +311,13 @@ const TvRequestModal = ({
       return;
     }
 
-    // If there are no more remaining requests available, block toggle
+    // Edits can release seasons as well as add them; the server checks their
+    // projected quota against other requests that still charge those seasons.
     if (
+      !editRequest &&
       quota?.tv.limit &&
       currentlyRemaining <= 0 &&
+      seasonCost(seasonNumber) > 0 &&
       !isSelectedSeason(seasonNumber)
     ) {
       return;
@@ -332,11 +336,17 @@ const TvRequestModal = ({
     (season) => !getAllRequestedSeasons().includes(season)
   );
 
+  const unrequestedSeasonCost = unrequestedSeasons.reduce(
+    (sum, sn) => sum + seasonCost(sn),
+    0
+  );
+
   const toggleAllSeasons = (): void => {
     // If the user has a quota and not enough requests for all seasons, block toggleAllSeasons
     if (
+      !editRequest &&
       quota?.tv.limit &&
-      (quota?.tv.remaining ?? 0) < unrequestedSeasons.length
+      (quota?.tv.remaining ?? 0) < unrequestedSeasonCost
     ) {
       return;
     }
@@ -481,7 +491,7 @@ const TvRequestModal = ({
           ? episodeRequest && !hasPermission(Permission.MANAGE_REQUESTS)
           : !settings.currentSettings.partialRequestsEnabled &&
               quota?.tv.limit &&
-              unrequestedSeasons.length > quota.tv.limit &&
+              unrequestedSeasonCost > (quota.tv.remaining ?? 0) &&
               !requestOverrides?.ignoreQuota
             ? true
             : unrequestedSeasons.length === 0 ||
@@ -525,7 +535,7 @@ const TvRequestModal = ({
         !(
           quota?.tv.limit &&
           !settings.currentSettings.partialRequestsEnabled &&
-          unrequestedSeasons.length > (quota?.tv.remaining ?? 0)
+          unrequestedSeasonCost > (quota?.tv.remaining ?? 0)
         ) &&
         getAllRequestedSeasons().length < getAllSeasons().length &&
         !editRequest && (
@@ -542,7 +552,7 @@ const TvRequestModal = ({
           quota={quota?.tv}
           remaining={
             !settings.currentSettings.partialRequestsEnabled &&
-            unrequestedSeasons.length > (quota?.tv.remaining ?? 0)
+            unrequestedSeasonCost > (quota?.tv.remaining ?? 0)
               ? 0
               : currentlyRemaining
           }
@@ -553,8 +563,8 @@ const TvRequestModal = ({
           }
           overLimit={
             !settings.currentSettings.partialRequestsEnabled &&
-            unrequestedSeasons.length > (quota?.tv.remaining ?? 0)
-              ? unrequestedSeasons.length
+            unrequestedSeasonCost > (quota?.tv.remaining ?? 0)
+              ? unrequestedSeasonCost
               : undefined
           }
         />
@@ -602,7 +612,7 @@ const TvRequestModal = ({
                         className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer items-center justify-center pt-2 focus:outline-none ${
                           quota?.tv.remaining &&
                           quota.tv.limit &&
-                          quota.tv.remaining < unrequestedSeasons.length
+                          quota.tv.remaining < unrequestedSeasonCost
                             ? 'opacity-50'
                             : ''
                         }`}
@@ -678,8 +688,10 @@ const TvRequestModal = ({
                               }}
                               className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer items-center justify-center pt-2 focus:outline-none ${
                                 isCovered ||
-                                (quota?.tv.limit &&
+                                (!editRequest &&
+                                  quota?.tv.limit &&
                                   currentlyRemaining <= 0 &&
+                                  seasonCost(season.seasonNumber) > 0 &&
                                   !isSelectedSeason(season.seasonNumber))
                                   ? 'opacity-50'
                                   : ''

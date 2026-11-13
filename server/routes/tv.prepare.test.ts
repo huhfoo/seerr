@@ -4,6 +4,7 @@ import { MediaStatus, MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { MediaRequest } from '@server/entity/MediaRequest';
+import OverrideRule from '@server/entity/OverrideRule';
 import { User } from '@server/entity/User';
 import { Permission } from '@server/lib/permissions';
 import type { SonarrSettings } from '@server/lib/settings';
@@ -45,13 +46,16 @@ beforeEach(() => {
   mock.method(
     ExternalAPI.prototype as unknown as { get: () => Promise<unknown> },
     'get',
-    async () => ({
-      id: 123,
-      name: 'Preview Series',
-      external_ids: { tvdb_id: 456 },
-      keywords: { results: [] },
-      videos: { results: [{ type: 'Trailer' }] },
-    })
+    async (endpoint: string) =>
+      endpoint.endsWith('/external_ids')
+        ? { tvdb_id: 1001 }
+        : {
+            id: 123,
+            name: 'Preview Series',
+            external_ids: { tvdb_id: 456 },
+            keywords: { results: [] },
+            videos: { results: [{ type: 'Trailer' }] },
+          }
   );
   mock.method(
     ExternalAPI.prototype as unknown as {
@@ -66,6 +70,7 @@ beforeEach(() => {
   mock.method(SonarrAPI.prototype, 'getEpisodes', async () => [
     {
       id: 100,
+      tvdbId: 1001,
       seasonNumber: 1,
       episodeNumber: 1,
       title: 'Pilot',
@@ -179,4 +184,59 @@ describe('TV release preview preparation', () => {
     );
     await request(app()).post('/tv/123/prepare').send({}).expect(403);
   });
+});
+
+it('uses request override rules when preview creates a series', async () => {
+  await getRepository(OverrideRule).save(
+    new OverrideRule({
+      sonarrServiceId: 0,
+      users: '1',
+      profileId: 4,
+      rootFolder: '/tv',
+      tags: '8',
+    })
+  );
+  getSettings().sonarr[0].activeProfileId = 999;
+  getSettings().sonarr[0].activeDirectory = '/wrong';
+  mock.method(SonarrAPI.prototype, 'getSeriesByTvdbId', async () => ({
+    id: 0,
+  }));
+  const add = mock.method(SonarrAPI.prototype, 'addSeries', async () => ({
+    id: 42,
+  }));
+  await request(app()).post('/tv/123/prepare').send({}).expect(200);
+  const options = add.mock.calls[0].arguments[0];
+  assert.equal(options?.profileId, 4);
+  assert.equal(options?.rootFolderPath, '/tv');
+  assert.deepEqual(options?.tags, [8]);
+});
+
+it('resolves a preview episode by external ID despite different numbering', async () => {
+  mock.method(SonarrAPI.prototype, 'getSeriesByTvdbId', async () => ({
+    id: 42,
+  }));
+  mock.method(SonarrAPI.prototype, 'getEpisodes', async () => [
+    { id: 100, tvdbId: 1001, seasonNumber: 2, episodeNumber: 5, hasFile: true },
+    {
+      id: 101,
+      tvdbId: 1002,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      hasFile: false,
+    },
+  ]);
+  const response = await request(app())
+    .post('/tv/123/prepare')
+    .send({ seasonNumber: 1, episodeNumber: 1 })
+    .expect(200);
+  assert.equal(response.body.episodes.length, 1);
+  assert.equal(response.body.episodes[0].id, 100);
+  assert.equal(response.body.episodes[0].seasonNumber, 1);
+  assert.equal(response.body.episodes[0].episodeNumber, 1);
+  const lookup = await request(app())
+    .get(
+      `/media/${response.body.mediaId}/episodes?seasonNumber=1&episodeNumber=1`
+    )
+    .expect(200);
+  assert.equal(lookup.body[0].id, 100);
 });

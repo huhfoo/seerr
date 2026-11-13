@@ -15,6 +15,7 @@ export interface SonarrSeason {
   };
 }
 export interface EpisodeResult {
+  tvdbId: number;
   seriesId: number;
   episodeFileId: number;
   seasonNumber: number;
@@ -95,7 +96,7 @@ export interface AddSeriesOptions {
   profileId: number;
   languageProfileId?: number;
   seasons: number[];
-  episodes?: { seasonNumber: number; episodeNumber: number }[];
+  episodes?: { seasonNumber: number; episodeNumber: number; tvdbId: number }[];
   seasonFolder: boolean;
   rootFolderPath: string;
   tags?: number[];
@@ -226,12 +227,7 @@ class SonarrAPI extends ServarrBase<{
         let attempt = 0;
         attempt < 15 &&
         options.episodes.some(
-          (selection) =>
-            !episodes.some(
-              (ep) =>
-                ep.seasonNumber === selection.seasonNumber &&
-                ep.episodeNumber === selection.episodeNumber
-            )
+          (selection) => !episodes.some((ep) => ep.tvdbId === selection.tvdbId)
         );
         attempt++
       ) {
@@ -239,11 +235,7 @@ class SonarrAPI extends ServarrBase<{
         episodes = await this.getEpisodes(series.id);
       }
       const selected = options.episodes.map((selection) => {
-        const episode = episodes.find(
-          (ep) =>
-            ep.seasonNumber === selection.seasonNumber &&
-            ep.episodeNumber === selection.episodeNumber
-        );
+        const episode = episodes.find((ep) => ep.tvdbId === selection.tvdbId);
         if (!episode)
           throw new Error(
             `Episode S${selection.seasonNumber}E${selection.episodeNumber} not found in Sonarr`
@@ -263,6 +255,11 @@ class SonarrAPI extends ServarrBase<{
 
       // If the series already exists, we will simply just update it
       if (series.id) {
+        // A preview-created (unmonitored) series must adopt the request's
+        // future-season policy when it becomes an actual request.
+        if (!series.monitored && options.monitored && options.monitorNewItems) {
+          series.monitorNewItems = options.monitorNewItems;
+        }
         series.monitored = options.monitored ?? series.monitored;
         series.tags = options.tags
           ? Array.from(new Set([...series.tags, ...options.tags]))

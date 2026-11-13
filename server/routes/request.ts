@@ -657,28 +657,18 @@ requestRoutes.put<{ requestId: string }>(
                 if (!request.ignoreQuota) {
                   const quotas = await requestUser.getQuota();
 
-                  // Only the seasons getQuota already counted for this owner are
-                  // paid for, so the edit is charged for everything it left out
-                  const quotaWindowStart = new Date();
-                  if (quotas.tv.days) {
-                    quotaWindowStart.setDate(
-                      quotaWindowStart.getDate() - quotas.tv.days
-                    );
+                  // Compute the replacement against other requests so removing a
+                  // season only frees quota when no other request still uses it.
+                  const chargedSeasons = await requestUser.getTvQuotaSeasonKeys(
+                    request.id
+                  );
+                  for (const sn of [...keptSeasons, ...newSeasons]) {
+                    chargedSeasons.add(`${media.tmdbId}:${request.is4k}:${sn}`);
                   }
-
-                  const countedAlready =
-                    !ownerChanging &&
-                    (!quotas.tv.days || request.createdAt > quotaWindowStart);
-
-                  const priorSeasonCount = countedAlready
-                    ? request.seasons.length
-                    : 0;
-                  const requiredSeasons =
-                    resultingSeasonCount - priorSeasonCount;
-
                   if (
                     quotas.tv.limit &&
-                    requiredSeasons > (quotas.tv.remaining ?? 0)
+                    chargedSeasons.size >
+                      Math.max(quotas.tv.limit, quotas.tv.used)
                   ) {
                     return next({
                       status: 403,

@@ -610,6 +610,38 @@ describe('PUT /request/:requestId (season availability)', () => {
 });
 
 describe('PUT /request/:requestId (quota)', () => {
+  it('does not double-charge a season already covered by an episode request', async () => {
+    const owner = await seedUser('demo@seerr.dev', { tvQuotaLimit: 2 });
+    const mediaRequest = await seedTvRequest(owner, [1]);
+    const episodeRequest = await seedTvRequest(owner, [2]);
+    episodeRequest.episodes = [
+      { seasonNumber: 2, episodeNumber: 1, tvdbId: 1001 },
+    ];
+    await getRepository(MediaRequest).save(episodeRequest);
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
+    await agent
+      .put(`/request/${mediaRequest.id}`)
+      .send({ mediaType: MediaType.TV, seasons: [1, 2] })
+      .expect(200);
+    assert.equal((await owner.getQuota()).tv.used, 2);
+  });
+
+  it('does not free a removed season still charged by an episode request', async () => {
+    const owner = await seedUser('demo@seerr.dev', { tvQuotaLimit: 1 });
+    const mediaRequest = await seedTvRequest(owner, [1]);
+    const episodeRequest = await seedTvRequest(owner, [1]);
+    episodeRequest.episodes = [
+      { seasonNumber: 1, episodeNumber: 1, tvdbId: 1001 },
+    ];
+    await getRepository(MediaRequest).save(episodeRequest);
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
+    await agent
+      .put(`/request/${mediaRequest.id}`)
+      .send({ mediaType: MediaType.TV, seasons: [2] })
+      .expect(403);
+    assert.equal((await owner.getQuota()).tv.used, 1);
+  });
+
   it('rejects adding seasons beyond the season limit', async () => {
     const requestRepo = getRepository(MediaRequest);
     const owner = await seedUser('demo@seerr.dev', { tvQuotaLimit: 2 });

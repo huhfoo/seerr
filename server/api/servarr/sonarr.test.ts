@@ -126,7 +126,7 @@ describe('SonarrAPI episode-only requests', () => {
     title: 'Pilot Test',
     profileId: 1,
     seasons: [1],
-    episodes: [{ seasonNumber: 1, episodeNumber: 1 }],
+    episodes: [{ seasonNumber: 1, episodeNumber: 1, tvdbId: 1001 }],
     seasonFolder: true,
     rootFolderPath: '/tv',
     seriesType: 'standard' as const,
@@ -158,6 +158,7 @@ describe('SonarrAPI episode-only requests', () => {
     mock.method(sonarr, 'getEpisodes', async () => [
       {
         id: 101,
+        tvdbId: 1001,
         seasonNumber: 1,
         episodeNumber: 1,
         hasFile: false,
@@ -165,6 +166,7 @@ describe('SonarrAPI episode-only requests', () => {
       },
       {
         id: 102,
+        tvdbId: 1002,
         seasonNumber: 1,
         episodeNumber: 2,
         hasFile: false,
@@ -205,7 +207,13 @@ describe('SonarrAPI episode-only requests', () => {
       data: {},
     }));
     mock.method(sonarr, 'getEpisodes', async () => [
-      { id: 101, seasonNumber: 1, episodeNumber: 1, hasFile: false },
+      {
+        id: 101,
+        tvdbId: 1001,
+        seasonNumber: 1,
+        episodeNumber: 1,
+        hasFile: false,
+      },
     ]);
     await sonarr.addSeries({ ...options, searchNow: false });
     const body = post.mock.calls[0].arguments[1] as {
@@ -244,6 +252,7 @@ describe('SonarrAPI episode-only requests', () => {
     mock.method(sonarr, 'getEpisodes', async () => [
       {
         id: 101,
+        tvdbId: 1001,
         seasonNumber: 1,
         episodeNumber: 1,
         hasFile: true,
@@ -253,4 +262,97 @@ describe('SonarrAPI episode-only requests', () => {
     await sonarr.addSeries(options);
     assert.equal(post.mock.callCount(), 0);
   });
+});
+
+it('matches selected episodes by TVDB identity when Sonarr numbering differs', async () => {
+  const sonarr = buildSonarr();
+  const add = mock.method(sonarr, 'getSeriesByTvdbId', async () => ({
+    id: 9,
+    seasons: [],
+    tags: [],
+    monitored: false,
+    monitorNewItems: 'none',
+  }));
+  const put = mock.method(
+    getAxios(sonarr),
+    'put',
+    async (_url: string, body: unknown) => ({ data: body })
+  );
+  mock.method(sonarr, 'getEpisodes', async () => [
+    {
+      id: 101,
+      tvdbId: 1001,
+      seasonNumber: 2,
+      episodeNumber: 5,
+      hasFile: false,
+    },
+    {
+      id: 102,
+      tvdbId: 1002,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      hasFile: false,
+    },
+  ]);
+  try {
+    await sonarr.addSeries({
+      tvdbid: 123,
+      title: 'Test',
+      seriesType: 'standard',
+      profileId: 1,
+      rootFolderPath: '/tv',
+      seasonFolder: true,
+      seasons: [1],
+      monitored: true,
+      episodes: [{ seasonNumber: 1, episodeNumber: 1, tvdbId: 1001 }],
+      searchNow: false,
+    });
+    assert.deepEqual(
+      put.mock.calls
+        .filter((call) => call.arguments[0] === '/episode/monitor')
+        .map((call) => call.arguments[1]),
+      [{ episodeIds: [101], monitored: true }]
+    );
+    assert.equal(add.mock.callCount(), 1);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+it('restores the requested future-season policy when activating a preview', async () => {
+  const sonarr = buildSonarr();
+  mock.method(sonarr, 'getSeriesByTvdbId', async () => ({
+    id: 9,
+    seasons: [],
+    tags: [],
+    monitored: false,
+    monitorNewItems: 'none',
+  }));
+  const put = mock.method(
+    getAxios(sonarr),
+    'put',
+    async (_url: string, body: unknown) => ({ data: body })
+  );
+  mock.method(sonarr, 'getEpisodes', async () => []);
+  try {
+    await sonarr.addSeries({
+      tvdbid: 123,
+      title: 'Test',
+      seriesType: 'standard',
+      profileId: 1,
+      rootFolderPath: '/tv',
+      seasonFolder: true,
+      seasons: [1],
+      monitored: true,
+      monitorNewItems: 'all',
+      searchNow: false,
+    });
+    assert.equal(
+      (put.mock.calls[0].arguments[1] as { monitorNewItems: string })
+        .monitorNewItems,
+      'all'
+    );
+  } finally {
+    mock.restoreAll();
+  }
 });

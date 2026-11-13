@@ -503,6 +503,26 @@ class TheMovieDb extends ExternalAPI implements TvShowProvider {
     }
   };
 
+  public async getTvEpisodeTvdbId({
+    tvId,
+    seasonNumber,
+    episodeNumber,
+  }: {
+    tvId: number;
+    seasonNumber: number;
+    episodeNumber: number;
+  }): Promise<number> {
+    const ids = await this.get<{ tvdb_id?: number | null }>(
+      `/tv/${tvId}/season/${seasonNumber}/episode/${episodeNumber}/external_ids`
+    );
+    if (!ids.tvdb_id || !Number.isInteger(ids.tvdb_id)) {
+      throw new Error(
+        'This episode has no TVDB mapping. Refresh its metadata before requesting it.'
+      );
+    }
+    return ids.tvdb_id;
+  }
+
   public getTvSeason = async ({
     tvId,
     seasonNumber,
