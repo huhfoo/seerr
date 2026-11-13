@@ -1,8 +1,9 @@
 import AirDateBadge from '@app/components/AirDateBadge';
 import CachedImage from '@app/components/Common/CachedImage';
 import LoadingSpinner from '@app/components/Common/LoadingSpinner';
+import EpisodeActions from '@app/components/TvDetails/Season/EpisodeActions';
 import defineMessages from '@app/utils/defineMessages';
-import type { SeasonWithEpisodes } from '@server/models/Tv';
+import type { SeasonWithEpisodes, TvDetails } from '@server/models/Tv';
 import { useIntl } from 'react-intl';
 import useSWR from 'swr';
 
@@ -18,6 +19,7 @@ type SeasonProps = {
 
 const Season = ({ seasonNumber, tvId }: SeasonProps) => {
   const intl = useIntl();
+  const { data: tv } = useSWR<TvDetails>(`/api/v1/tv/${tvId}`);
   const { data, error } = useSWR<SeasonWithEpisodes>(
     `/api/v1/tv/${tvId}/season/${seasonNumber}`
   );
@@ -40,13 +42,18 @@ const Season = ({ seasonNumber, tvId }: SeasonProps) => {
           .reverse()
           .map((episode) => {
             return (
-              <div
+              <article
+                id={`episode-${seasonNumber}-${episode.episodeNumber}`}
+                aria-labelledby={`episode-title-${seasonNumber}-${episode.episodeNumber}`}
                 className="flex flex-col space-y-4 py-4 xl:flex-row xl:space-x-4 xl:space-y-4"
                 key={`season-${seasonNumber}-episode-${episode.episodeNumber}`}
               >
                 <div className="flex-1">
                   <div className="flex flex-col space-y-2 xl:flex-row xl:items-center xl:space-x-2 xl:space-y-0">
-                    <h3 className="text-lg">
+                    <h3
+                      id={`episode-title-${seasonNumber}-${episode.episodeNumber}`}
+                      className="text-lg"
+                    >
                       {episode.episodeNumber} - {episode.name}
                     </h3>
                     {episode.airDate && (
@@ -54,6 +61,13 @@ const Season = ({ seasonNumber, tvId }: SeasonProps) => {
                     )}
                   </div>
                   {episode.overview && <p>{episode.overview}</p>}
+                  {tv && (
+                    <EpisodeActions
+                      tv={tv}
+                      seasonNumber={seasonNumber}
+                      episodeNumber={episode.episodeNumber}
+                    />
+                  )}
                 </div>
                 {episode.stillPath && (
                   <div className="relative aspect-video xl:h-32">
@@ -66,7 +80,7 @@ const Season = ({ seasonNumber, tvId }: SeasonProps) => {
                     />
                   </div>
                 )}
-              </div>
+              </article>
             );
           })
       )}

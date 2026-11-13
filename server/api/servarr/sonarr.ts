@@ -14,7 +14,7 @@ export interface SonarrSeason {
     percentOfEpisodes: number;
   };
 }
-interface EpisodeResult {
+export interface EpisodeResult {
   seriesId: number;
   episodeFileId: number;
   seasonNumber: number;
@@ -95,6 +95,7 @@ export interface AddSeriesOptions {
   profileId: number;
   languageProfileId?: number;
   seasons: number[];
+  episodes?: { seasonNumber: number; episodeNumber: number }[];
   seasonFolder: boolean;
   rootFolderPath: string;
   tags?: number[];
@@ -208,6 +209,55 @@ class SonarrAPI extends ServarrBase<{
   }
 
   public async addSeries(options: AddSeriesOptions): Promise<SonarrSeries> {
+    if (options.episodes?.length) {
+      // Add without monitoring any seasons or running a whole-series search.
+      // For an existing series, preserve its existing monitoring selections.
+      const series = await this.addSeries({
+        ...options,
+        episodes: undefined,
+        seasons: [],
+        searchNow: false,
+        monitorNewItems: 'none',
+      });
+      if (!series.id) throw new Error('Sonarr did not return a series ID');
+      let episodes = await this.getEpisodes(series.id);
+      // New series metadata is populated asynchronously by Sonarr's refresh job.
+      for (
+        let attempt = 0;
+        attempt < 15 &&
+        options.episodes.some(
+          (selection) =>
+            !episodes.some(
+              (ep) =>
+                ep.seasonNumber === selection.seasonNumber &&
+                ep.episodeNumber === selection.episodeNumber
+            )
+        );
+        attempt++
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        episodes = await this.getEpisodes(series.id);
+      }
+      const selected = options.episodes.map((selection) => {
+        const episode = episodes.find(
+          (ep) =>
+            ep.seasonNumber === selection.seasonNumber &&
+            ep.episodeNumber === selection.episodeNumber
+        );
+        if (!episode)
+          throw new Error(
+            `Episode S${selection.seasonNumber}E${selection.episodeNumber} not found in Sonarr`
+          );
+        return episode;
+      });
+      await this.monitorEpisodes(selected.map((ep) => ep.id));
+      if (options.searchNow) {
+        const missing = selected.filter((ep) => !ep.hasFile).map((ep) => ep.id);
+        if (missing.length)
+          await this.runCommand('EpisodeSearch', { episodeIds: missing });
+      }
+      return series;
+    }
     try {
       const series = await this.getSeriesByTvdbId(options.tvdbid);
 
@@ -299,6 +349,7 @@ class SonarrAPI extends ServarrBase<{
           rootFolderPath: options.rootFolderPath,
           seriesType: options.seriesType,
           addOptions: {
+            ...(options.seasons.length === 0 ? { monitor: 'none' } : {}),
             ignoreEpisodesWithFiles: true,
             searchForMissingEpisodes: options.searchNow,
           },

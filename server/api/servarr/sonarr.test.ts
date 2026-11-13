@@ -117,3 +117,140 @@ describe('SonarrAPI getSeriesByTvdbId', () => {
     });
   });
 });
+
+describe('SonarrAPI episode-only requests', () => {
+  afterEach(() => mock.restoreAll());
+
+  const options = {
+    tvdbid: 123,
+    title: 'Pilot Test',
+    profileId: 1,
+    seasons: [1],
+    episodes: [{ seasonNumber: 1, episodeNumber: 1 }],
+    seasonFolder: true,
+    rootFolderPath: '/tv',
+    seriesType: 'standard' as const,
+    monitored: true,
+    searchNow: true,
+  };
+
+  it('monitors and searches only the selected missing episode, preserving existing season monitoring', async () => {
+    const sonarr = buildSonarr();
+    const existingSeasons = [
+      { seasonNumber: 1, monitored: false },
+      { seasonNumber: 2, monitored: true },
+    ];
+    mock.method(sonarr, 'getSeriesByTvdbId', async () => ({
+      id: 9,
+      title: 'Pilot Test',
+      seasons: existingSeasons,
+      monitored: true,
+      tags: [],
+    }));
+    const put = mock.method(
+      getAxios(sonarr),
+      'put',
+      async (_url: string, body: unknown) => ({ data: body })
+    );
+    const post = mock.method(getAxios(sonarr), 'post', async () => ({
+      data: {},
+    }));
+    mock.method(sonarr, 'getEpisodes', async () => [
+      {
+        id: 101,
+        seasonNumber: 1,
+        episodeNumber: 1,
+        hasFile: false,
+        monitored: false,
+      },
+      {
+        id: 102,
+        seasonNumber: 1,
+        episodeNumber: 2,
+        hasFile: false,
+        monitored: false,
+      },
+    ]);
+    await sonarr.addSeries(options);
+    assert.deepEqual(existingSeasons, [
+      { seasonNumber: 1, monitored: false },
+      { seasonNumber: 2, monitored: true },
+    ]);
+    const monitors = put.mock.calls.filter(
+      (call) => call.arguments[0] === '/episode/monitor'
+    );
+    assert.deepEqual(
+      monitors.map((call) => call.arguments[1]),
+      [{ episodeIds: [101], monitored: true }]
+    );
+    assert.deepEqual(
+      post.mock.calls.map((call) => call.arguments),
+      [['/command', { name: 'EpisodeSearch', episodeIds: [101] }]]
+    );
+  });
+
+  it('adds a new series without monitoring whole seasons or searching, then monitors only the pilot', async () => {
+    const sonarr = buildSonarr();
+    mock.method(sonarr, 'getSeriesByTvdbId', async () => ({
+      title: 'Pilot Test',
+      seasons: [
+        { seasonNumber: 1, monitored: true },
+        { seasonNumber: 2, monitored: true },
+      ],
+    }));
+    const post = mock.method(getAxios(sonarr), 'post', async () => ({
+      data: { id: 9 },
+    }));
+    const put = mock.method(getAxios(sonarr), 'put', async () => ({
+      data: {},
+    }));
+    mock.method(sonarr, 'getEpisodes', async () => [
+      { id: 101, seasonNumber: 1, episodeNumber: 1, hasFile: false },
+    ]);
+    await sonarr.addSeries({ ...options, searchNow: false });
+    const body = post.mock.calls[0].arguments[1] as {
+      seasons: { monitored: boolean }[];
+      monitorNewItems: string;
+      addOptions: { searchForMissingEpisodes: boolean; monitor: string };
+    };
+    assert.ok(body.seasons.every((season) => !season.monitored));
+    assert.equal(body.monitorNewItems, 'none');
+    assert.equal(body.addOptions.searchForMissingEpisodes, false);
+    assert.equal(body.addOptions.monitor, 'none');
+    assert.equal(post.mock.callCount(), 1);
+    assert.deepEqual(put.mock.calls[0].arguments[1], {
+      episodeIds: [101],
+      monitored: true,
+    });
+  });
+
+  it('does not search an episode that already has a file', async () => {
+    const sonarr = buildSonarr();
+    mock.method(sonarr, 'getSeriesByTvdbId', async () => ({
+      id: 9,
+      title: 'Pilot Test',
+      seasons: [],
+      monitored: true,
+      tags: [],
+    }));
+    mock.method(
+      getAxios(sonarr),
+      'put',
+      async (_url: string, body: unknown) => ({ data: body })
+    );
+    const post = mock.method(getAxios(sonarr), 'post', async () => ({
+      data: {},
+    }));
+    mock.method(sonarr, 'getEpisodes', async () => [
+      {
+        id: 101,
+        seasonNumber: 1,
+        episodeNumber: 1,
+        hasFile: true,
+        monitored: true,
+      },
+    ]);
+    await sonarr.addSeries(options);
+    assert.equal(post.mock.callCount(), 0);
+  });
+});

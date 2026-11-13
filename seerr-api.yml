@@ -1282,6 +1282,18 @@ components:
             - $ref: '#/components/schemas/User'
             - type: string
               nullable: true
+        episodes:
+          type: array
+          nullable: true
+          description: Selected episodes, or null for a whole-season request.
+          items:
+            type: object
+            properties:
+              seasonNumber: { type: integer }
+              episodeNumber: { type: integer }
+        manualSearch:
+          type: boolean
+          description: Automatic search was skipped for manual release selection.
         is4k:
           type: boolean
           example: false
@@ -2174,6 +2186,87 @@ components:
       name: X-Api-Key
 
 paths:
+  /tv/{id}/prepare:
+    post:
+      summary: Prepare an unmonitored Sonarr entry for release previews
+      description: Requires MANAGE_REQUESTS. Does not create a request or change monitoring on an existing series.
+      tags: [tv]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                is4k: { type: boolean }
+                serverId: { type: integer, minimum: 0 }
+                profileId: { type: integer, minimum: 1 }
+                rootFolder: { type: string }
+                languageProfileId: { type: integer, minimum: 1 }
+                tvdbId: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          {
+            description: Media ID and Sonarr episodes available for release searches,
+          }
+
+  /media/{id}/episodes:
+    get:
+      summary: List episodes linked to Sonarr
+      tags: [media]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: is4k
+          schema: { type: string, enum: ['true', 'false'] }
+      responses:
+        '200': { description: Sonarr episodes }
+  /media/{id}/releases:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - in: query
+        name: is4k
+        schema: { type: string, enum: ['true', 'false'] }
+      - in: query
+        name: episodeId
+        schema: { type: integer, minimum: 1 }
+      - in: query
+        name: seasonNumber
+        schema: { type: integer, minimum: 0 }
+    get:
+      summary: Search releases in Sonarr or Radarr (MANAGE_REQUESTS)
+      tags: [media]
+      responses:
+        '200': { description: Release search results }
+    post:
+      summary: Grab a release from this title's search results (MANAGE_REQUESTS)
+      tags: [media]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [guid, indexerId]
+              properties:
+                guid: { type: string, minLength: 1 }
+                indexerId: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: Release sent to download client }
+
   /status:
     get:
       summary: Get Seerr status
@@ -6607,6 +6700,24 @@ paths:
                 tvdbId:
                   type: number
                   example: 123
+                episodes:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [seasonNumber, episodeNumber]
+                    additionalProperties: false
+                    properties:
+                      seasonNumber:
+                        type: integer
+                        minimum: 0
+                      episodeNumber:
+                        type: integer
+                        minimum: 1
+                manualSearch:
+                  type: boolean
+                  description: Skip automatic search to select a release manually. Requires MANAGE_REQUESTS.
                 seasons:
                   oneOf:
                     - type: array

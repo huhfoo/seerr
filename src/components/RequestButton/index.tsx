@@ -293,7 +293,9 @@ const RequestButton = ({
     });
   } else if (
     mediaType === 'tv' &&
-    (!activeRequest || activeRequest.requestedBy.id !== user?.id) &&
+    (!activeRequest ||
+      !!activeRequest.episodes?.length ||
+      activeRequest.requestedBy.id !== user?.id) &&
     hasPermission([Permission.REQUEST, Permission.REQUEST_TV], {
       type: 'or',
     }) &&
@@ -340,7 +342,9 @@ const RequestButton = ({
     });
   } else if (
     mediaType === 'tv' &&
-    (!active4kRequest || active4kRequest.requestedBy.id !== user?.id) &&
+    (!active4kRequest ||
+      !!active4kRequest.episodes?.length ||
+      active4kRequest.requestedBy.id !== user?.id) &&
     hasPermission([Permission.REQUEST_4K, Permission.REQUEST_4K_TV], {
       type: 'or',
     }) &&

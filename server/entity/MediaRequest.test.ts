@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
 
 import ExternalAPI from '@server/api/externalapi';
-import { MediaType } from '@server/constants/media';
+import { MediaStatus, MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import {
@@ -10,6 +10,7 @@ import {
   MediaRequest,
   QuotaRestrictedError,
 } from '@server/entity/MediaRequest';
+import Season from '@server/entity/Season';
 import SeasonRequest from '@server/entity/SeasonRequest';
 import { User } from '@server/entity/User';
 import { Permission } from '@server/lib/permissions';
@@ -22,6 +23,12 @@ const externalApiGetMock = mock.method(
   },
   'get',
   async (endpoint: string) => {
+    const episodeSeason = endpoint.match(/^\/tv\/(\d+)\/season\/(\d+)$/);
+    if (episodeSeason)
+      return {
+        id: Number(episodeSeason[2]),
+        episodes: [1, 2, 3].map((episode_number) => ({ episode_number })),
+      };
     const tmdbId = Number(endpoint.replace(/^\/(movie|tv)\//, ''));
 
     if (!tmdbId) {
@@ -201,5 +208,131 @@ describe('MediaRequest.request', () => {
       }),
       1
     );
+  });
+});
+
+describe('episode selections', () => {
+  it('persists a pilot request and permits another episode in the same season', async () => {
+    const requester = await seedRequester(5);
+    const pilot = await MediaRequest.request(
+      {
+        mediaType: MediaType.TV,
+        mediaId: 8888,
+        episodes: [{ seasonNumber: 1, episodeNumber: 1 }],
+      },
+      requester
+    );
+    const second = await MediaRequest.request(
+      {
+        mediaType: MediaType.TV,
+        mediaId: 8888,
+        episodes: [{ seasonNumber: 1, episodeNumber: 2 }],
+      },
+      requester
+    );
+    assert.deepEqual(pilot.episodes, [{ seasonNumber: 1, episodeNumber: 1 }]);
+    assert.deepEqual(second.episodes, [{ seasonNumber: 1, episodeNumber: 2 }]);
+    const stored = await getRepository(MediaRequest).findOneByOrFail({
+      id: pilot.id,
+    });
+    assert.deepEqual(stored.episodes, pilot.episodes);
+  });
+
+  it('allows requesting the remaining whole season after an episode-only request', async () => {
+    const requester = await seedRequester(5);
+    await MediaRequest.request(
+      {
+        mediaType: MediaType.TV,
+        mediaId: 8888,
+        episodes: [{ seasonNumber: 1, episodeNumber: 1 }],
+      },
+      requester
+    );
+    const season = await MediaRequest.request(
+      { mediaType: MediaType.TV, mediaId: 8888, seasons: [1] },
+      requester
+    );
+    assert.deepEqual(
+      season.seasons.map((sn) => sn.seasonNumber),
+      [1]
+    );
+    assert.equal(season.episodes?.length ?? 0, 0);
+  });
+
+  it('does not lock a season partially downloaded outside Seerr', async () => {
+    const requester = await seedRequester(5);
+    const media = await getRepository(Media).save(
+      new Media({
+        tmdbId: 8888,
+        mediaType: MediaType.TV,
+        status: MediaStatus.PARTIALLY_AVAILABLE,
+      })
+    );
+    await getRepository(Season).save(
+      new Season({
+        media: Promise.resolve(media),
+        seasonNumber: 1,
+        status: MediaStatus.PARTIALLY_AVAILABLE,
+      })
+    );
+    const request = await MediaRequest.request(
+      { mediaType: MediaType.TV, mediaId: 8888, seasons: [1] },
+      requester
+    );
+    assert.deepEqual(
+      request.seasons.map((sn) => sn.seasonNumber),
+      [1]
+    );
+  });
+
+  it('deduplicates concurrent requests for the same episode', async () => {
+    const requester = await seedRequester(5);
+    const results = await Promise.allSettled(
+      [1, 2].map(() =>
+        MediaRequest.request(
+          {
+            mediaType: MediaType.TV,
+            mediaId: 8888,
+            episodes: [{ seasonNumber: 1, episodeNumber: 1 }],
+          },
+          requester
+        )
+      )
+    );
+    assert.equal(
+      results.filter((result) => result.status === 'fulfilled').length,
+      1
+    );
+    assert.equal(await getRepository(MediaRequest).count(), 1);
+  });
+
+  it('rejects nonexistent episodes and unauthorized manual searches', async () => {
+    const requester = await seedRequester(5);
+    await assert.rejects(
+      () =>
+        MediaRequest.request(
+          {
+            mediaType: MediaType.TV,
+            mediaId: 8888,
+            episodes: [{ seasonNumber: 1, episodeNumber: 999 }],
+          },
+          requester
+        ),
+      /Unknown episode/
+    );
+    await assert.rejects(
+      () =>
+        MediaRequest.request(
+          {
+            mediaType: MediaType.TV,
+            mediaId: 8888,
+            seasons: [1],
+            manualSearch: true,
+          },
+          requester
+        ),
+      /MANAGE_REQUESTS/
+    );
+    assert.equal(await getRepository(MediaRequest).count(), 0);
   });
 });

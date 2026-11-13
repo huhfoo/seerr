@@ -1,3 +1,5 @@
+> This fork adds individual episode requests, so you can request a pilot or any episode without requesting the whole season.
+
 <p align="center">
 <img src="./public/logo_full.svg" alt="Seerr" style="margin: 20px 0;">
 </p>

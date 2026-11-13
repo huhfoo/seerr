@@ -260,7 +260,15 @@ const RequestBlock = ({ request, onUpdate }: RequestBlockProps) => {
             </Tooltip>
           </div>
         </div>
-        {(request.seasons ?? []).length > 0 && (
+        {!!request.episodes?.length && (
+          <div className="my-2 text-sm">
+            Episodes:{' '}
+            {request.episodes
+              .map((ep) => `S${ep.seasonNumber}E${ep.episodeNumber}`)
+              .join(', ')}
+          </div>
+        )}
+        {!request.episodes?.length && (request.seasons ?? []).length > 0 && (
           <div className="mt-2 flex flex-col text-sm">
             <div className="mb-1 font-medium">
               {intl.formatMessage(messages.seasons, {

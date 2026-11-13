@@ -138,7 +138,13 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       availableSeasons.length > 0 &&
       availableSeasons.length === requestedSeasons.length;
 
-    if (!isMediaAvailable) {
+    if (
+      !isMediaAvailable &&
+      !(
+        entity.episodes?.length &&
+        entity.status === MediaRequestStatus.COMPLETED
+      )
+    ) {
       return;
     }
 
@@ -398,7 +404,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           year: Number(movie.release_date.slice(0, 4)),
           monitored: true,
           tags,
-          searchNow: !radarrSettings.preventSearch,
+          searchNow: !entity.manualSearch && !radarrSettings.preventSearch,
         };
 
         // Run entity asynchronously so we don't wait for it on the UI side
@@ -765,12 +771,13 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           title: series.name,
           tvdbid: tvdbId,
           seasons: entity.seasons.map((season) => season.seasonNumber),
+          episodes: entity.episodes ?? undefined,
           seasonFolder: sonarrSettings.enableSeasonFolders,
           seriesType,
           tags,
           monitored: true,
           monitorNewItems: sonarrSettings.monitorNewItems,
-          searchNow: !sonarrSettings.preventSearch,
+          searchNow: !entity.manualSearch && !sonarrSettings.preventSearch,
         };
 
         // Run entity asynchronously so we don't wait for it on the UI side

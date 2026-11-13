@@ -37,6 +37,7 @@ import issueCommentRoutes from './issueComment';
 import mediaRoutes from './media';
 import movieRoutes from './movie';
 import personRoutes from './person';
+import releaseRoutes from './releases';
 import requestRoutes from './request';
 import searchRoutes from './search';
 import serviceRoutes from './service';
@@ -46,6 +47,7 @@ import user from './user';
 const router = Router();
 
 router.use(checkUser);
+router.use(releaseRoutes);
 
 router.get<unknown, StatusResponse>('/status', async (req, res) => {
   const settings = getSettings();

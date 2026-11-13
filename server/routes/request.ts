@@ -566,6 +566,14 @@ requestRoutes.put<{ requestId: string }>(
             }
             request.requestedBy = requestUser as User;
 
+            if (request.episodes?.length) {
+              return next({
+                status: 400,
+                message:
+                  'Cancel this episode request and create a new one to change its selection.',
+              });
+            }
+
             const requestedSeasons = req.body.seasons as number[] | undefined;
 
             if (!requestedSeasons || requestedSeasons.length === 0) {
@@ -596,6 +604,7 @@ requestRoutes.put<{ requestId: string }>(
                     (r) =>
                       r.is4k === request.is4k &&
                       r.id !== request.id &&
+                      !r.episodes?.length &&
                       r.status !== MediaRequestStatus.DECLINED &&
                       r.status !== MediaRequestStatus.COMPLETED
                   )
@@ -616,10 +625,8 @@ requestRoutes.put<{ requestId: string }>(
                 const coveredSeasons = (media.seasons ?? [])
                   .filter(
                     (season) =>
-                      season[request.is4k ? 'status4k' : 'status'] !==
-                        MediaStatus.UNKNOWN &&
-                      season[request.is4k ? 'status4k' : 'status'] !==
-                        MediaStatus.DELETED
+                      season[request.is4k ? 'status4k' : 'status'] ===
+                      MediaStatus.AVAILABLE
                   )
                   .map((season) => season.seasonNumber)
                   .filter((sn) => !currentSeasons.includes(sn));

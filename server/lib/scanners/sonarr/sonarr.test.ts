@@ -1457,3 +1457,115 @@ describe('Sonarr Scanner', () => {
     });
   });
 });
+
+describe('episode request completion', () => {
+  it('completes a pilot request while leaving the season partially available', async () => {
+    const request = await seedShowRequest(
+      9100,
+      100,
+      MediaStatus.PROCESSING,
+      [MediaStatus.PROCESSING],
+      [1]
+    );
+    request.episodes = [{ seasonNumber: 1, episodeNumber: 1 }];
+    await getRepository(MediaRequest).save(request);
+    configureSonarr([{}]);
+    getTvShowImpl = async () => fakeTmdbShow(9100);
+    getSeriesImpl = async () => [
+      fakeSonarrSeries({ seasons: [sonarrSeason(1, false, 1)] }),
+    ];
+    const episodes = mock.method(
+      SonarrAPI.prototype,
+      'getEpisodes',
+      async () => [
+        { id: 1, seasonNumber: 1, episodeNumber: 1, hasFile: true },
+        { id: 2, seasonNumber: 1, episodeNumber: 2, hasFile: false },
+      ]
+    );
+    try {
+      await runWithMockTimers(() => sonarrScanner.run());
+      const updated = await getRepository(MediaRequest).findOneByOrFail({
+        id: request.id,
+      });
+      const media = await getRepository(Media).findOneByOrFail({
+        tmdbId: 9100,
+      });
+      assert.equal(updated.status, MediaRequestStatus.COMPLETED);
+      assert.equal(updated.seasons[0].status, MediaRequestStatus.COMPLETED);
+      assert.equal(media.status, MediaStatus.PARTIALLY_AVAILABLE);
+    } finally {
+      episodes.mock.restore();
+    }
+  });
+
+  it('keeps a request approved when a different episode has downloaded', async () => {
+    const request = await seedShowRequest(
+      9101,
+      100,
+      MediaStatus.PROCESSING,
+      [MediaStatus.PROCESSING],
+      [1]
+    );
+    request.episodes = [{ seasonNumber: 1, episodeNumber: 2 }];
+    await getRepository(MediaRequest).save(request);
+    configureSonarr([{}]);
+    getTvShowImpl = async () => fakeTmdbShow(9101);
+    getSeriesImpl = async () => [
+      fakeSonarrSeries({ seasons: [sonarrSeason(1, false, 1)] }),
+    ];
+    const episodes = mock.method(
+      SonarrAPI.prototype,
+      'getEpisodes',
+      async () => [
+        { id: 1, seasonNumber: 1, episodeNumber: 1, hasFile: true },
+        { id: 2, seasonNumber: 1, episodeNumber: 2, hasFile: false },
+      ]
+    );
+    try {
+      await runWithMockTimers(() => sonarrScanner.run());
+      const updated = await getRepository(MediaRequest).findOneByOrFail({
+        id: request.id,
+      });
+      assert.equal(updated.status, MediaRequestStatus.APPROVED);
+    } finally {
+      episodes.mock.restore();
+    }
+  });
+});
+
+it('preserves an episode request while its individually monitored pilot is still downloading', async () => {
+  const request = await seedShowRequest(
+    9102,
+    100,
+    MediaStatus.PROCESSING,
+    [MediaStatus.PROCESSING],
+    [1]
+  );
+  request.episodes = [{ seasonNumber: 1, episodeNumber: 1 }];
+  await getRepository(MediaRequest).save(request);
+  configureSonarr([{}]);
+  getTvShowImpl = async () => fakeTmdbShow(9102);
+  getSeriesImpl = async () => [
+    fakeSonarrSeries({ seasons: [sonarrSeason(1, false, 0)] }),
+  ];
+  const episodes = mock.method(SonarrAPI.prototype, 'getEpisodes', async () => [
+    {
+      id: 1,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      hasFile: false,
+      monitored: true,
+    },
+  ]);
+  try {
+    await runWithMockTimers(() => sonarrScanner.run());
+    const updated = await getRepository(MediaRequest).findOneByOrFail({
+      id: request.id,
+    });
+    const media = await getRepository(Media).findOneByOrFail({ tmdbId: 9102 });
+    assert.equal(updated.status, MediaRequestStatus.APPROVED);
+    assert.equal(media.status, MediaStatus.PROCESSING);
+  } finally {
+    episodes.mock.restore();
+  }
+});

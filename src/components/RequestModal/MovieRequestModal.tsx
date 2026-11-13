@@ -35,6 +35,9 @@ const messages = defineMessages('components.RequestModal', {
   requestApproved: 'Request for <strong>{title}</strong> approved!',
   requesterror: 'Something went wrong while submitting the request.',
   pendingapproval: 'Your request is pending approval.',
+  manualRelease: 'Choose a Release Manually',
+  manualReleaseTip:
+    'Skip automatic search. After requesting, open Manage → Browse releases.',
 });
 
 interface RequestModalProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -61,6 +64,7 @@ const MovieRequestModal = ({
   const { data, error } = useSWR<MovieDetails>(`/api/v1/movie/${tmdbId}`, {
     revalidateOnMount: true,
   });
+  const [manualSearch, setManualSearch] = useState(false);
   const intl = useIntl();
   const { user, hasPermission } = useUser();
   const { data: quota } = useSWR<QuotaResponse>(
@@ -95,6 +99,7 @@ const MovieRequestModal = ({
         mediaType: 'movie',
         is4k,
         ignoreQuota: requestOverrides?.ignoreQuota,
+        manualSearch,
         ...overrideParams,
       });
       mutate('/api/v1/request?filter=all&take=10&sort=modified&skip=0');
@@ -134,6 +139,7 @@ const MovieRequestModal = ({
       setIsUpdating(false);
     }
   }, [
+    manualSearch,
     requestOverrides,
     data?.id,
     data?.title,
@@ -361,6 +367,21 @@ const MovieRequestModal = ({
               : undefined
           }
         />
+      )}
+      {!editRequest && hasPermission(Permission.MANAGE_REQUESTS) && (
+        <div className="my-4">
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={manualSearch}
+              onChange={(event) => setManualSearch(event.target.checked)}
+            />
+            {intl.formatMessage(messages.manualRelease)}
+          </label>
+          <p className="label-tip">
+            {intl.formatMessage(messages.manualReleaseTip)}
+          </p>
+        </div>
       )}
       {hasPermission(
         [Permission.REQUEST_ADVANCED, Permission.MANAGE_REQUESTS],

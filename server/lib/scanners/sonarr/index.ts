@@ -8,9 +8,15 @@ import type {
   TmdbTvDetails,
   TmdbTvScanDetails,
 } from '@server/api/themoviedb/interfaces';
-import { MediaStatus, MediaType } from '@server/constants/media';
+import {
+  MediaRequestStatus,
+  MediaStatus,
+  MediaType,
+} from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
+import { MediaRequest } from '@server/entity/MediaRequest';
+import SeasonRequest from '@server/entity/SeasonRequest';
 import type {
   ProcessableSeason,
   RunnableScanner,
@@ -240,6 +246,29 @@ class SonarrScanner
           }
         });
 
+      const requests = await getRepository(MediaRequest).find({
+        where: {
+          media: { tmdbId, mediaType: MediaType.TV },
+          is4k: server4k,
+          status: MediaRequestStatus.APPROVED,
+        },
+        relations: { media: true },
+      });
+      const episodeRequests = requests.filter(
+        (request) =>
+          request.episodes?.length &&
+          ((request.serverId ??
+            request.media[server4k ? 'serviceId4k' : 'serviceId']) ===
+            this.currentServer.id ||
+            ((request.serverId ??
+              request.media[server4k ? 'serviceId4k' : 'serviceId']) == null &&
+              this.currentServer.isDefault))
+      );
+      const selectedEpisodeState =
+        episodeRequests.length && sonarrSeries.id
+          ? await this.sonarrApi.getEpisodes(sonarrSeries.id)
+          : [];
+
       for (const season of filteredSeasons) {
         const totalAvailableEpisodes = season.statistics?.episodeFileCount ?? 0;
 
@@ -248,7 +277,15 @@ class SonarrScanner
           episodes: !server4k ? totalAvailableEpisodes : 0,
           episodes4k: server4k ? totalAvailableEpisodes : 0,
           totalEpisodes: season.statistics?.totalEpisodeCount ?? 0,
-          processing: season.monitored && totalAvailableEpisodes === 0,
+          processing:
+            totalAvailableEpisodes === 0 &&
+            (season.monitored ||
+              selectedEpisodeState.some(
+                (ep) =>
+                  ep.seasonNumber === season.seasonNumber &&
+                  ep.monitored &&
+                  !ep.hasFile
+              )),
           is4kOverride: server4k,
         });
       }
@@ -275,6 +312,27 @@ class SonarrScanner
         title: sonarrSeries.title,
         is4k: server4k,
       });
+      // Episode requests complete independently of the rest of their season.
+      if (episodeRequests.length && sonarrSeries.id) {
+        for (const request of episodeRequests) {
+          const ready = request.episodes!.every((selection) =>
+            selectedEpisodeState.some(
+              (ep) =>
+                ep.seasonNumber === selection.seasonNumber &&
+                ep.episodeNumber === selection.episodeNumber &&
+                ep.hasFile
+            )
+          );
+          if (ready) {
+            for (const season of request.seasons) {
+              season.status = MediaRequestStatus.COMPLETED;
+              await getRepository(SeasonRequest).save(season);
+            }
+            request.status = MediaRequestStatus.COMPLETED;
+            await getRepository(MediaRequest).save(request);
+          }
+        }
+      }
     } catch (e) {
       (server4k ? this.failed4kTvdbIds : this.failedTvdbIds).add(
         sonarrSeries.tvdbId

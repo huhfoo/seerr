@@ -82,6 +82,14 @@ export class MediaRequest {
     const userRepository = getRepository(User);
     const settings = getSettings();
 
+    if (
+      requestBody.manualSearch &&
+      !user.hasPermission(Permission.MANAGE_REQUESTS)
+    ) {
+      throw new RequestPermissionError(
+        'Manual release selection requires MANAGE_REQUESTS permission.'
+      );
+    }
     let requestUser = user;
 
     if (
@@ -366,6 +374,7 @@ export class MediaRequest {
           ? user
           : undefined,
         is4k: requestBody.is4k,
+        manualSearch: requestBody.manualSearch ?? false,
         serverId: requestedServiceId,
         profileId: profileId,
         rootFolder: rootFolder,
@@ -380,8 +389,9 @@ export class MediaRequest {
       const tmdbMediaShow = tmdbMedia as Awaited<
         ReturnType<typeof tmdb.getTvShow>
       >;
-      let requestedSeasons =
-        requestBody.seasons === 'all'
+      let requestedSeasons = requestBody.episodes
+        ? [...new Set(requestBody.episodes.map((ep) => ep.seasonNumber))]
+        : requestBody.seasons === 'all'
           ? tmdbMediaShow.seasons
               .filter(
                 (season) =>
@@ -391,6 +401,42 @@ export class MediaRequest {
           : (requestBody.seasons as number[]);
       if (!settings.main.enableSpecialEpisodes) {
         requestedSeasons = requestedSeasons.filter((sn) => sn > 0);
+      }
+
+      const selectedEpisodes = requestBody.episodes;
+      if (selectedEpisodes) {
+        if (!selectedEpisodes.length || selectedEpisodes.length > 500) {
+          throw new RequestPermissionError(
+            'Select between 1 and 500 episodes.'
+          );
+        }
+        requestedSeasons = [
+          ...new Set(selectedEpisodes.map((ep) => ep.seasonNumber)),
+        ];
+        for (const sn of requestedSeasons) {
+          if (
+            (!settings.main.enableSpecialEpisodes && sn === 0) ||
+            !Number.isInteger(sn) ||
+            sn < 0
+          ) {
+            throw new RequestPermissionError('Invalid episode season.');
+          }
+          const season = await tmdb.getTvSeason({
+            tvId: requestBody.mediaId,
+            seasonNumber: sn,
+          });
+          if (
+            selectedEpisodes.some(
+              (ep) =>
+                ep.seasonNumber === sn &&
+                !season.episodes.some(
+                  (item) => item.episode_number === ep.episodeNumber
+                )
+            )
+          ) {
+            throw new RequestPermissionError('Unknown episode selected.');
+          }
+        }
       }
 
       let existingSeasons: number[] = [];
@@ -403,6 +449,7 @@ export class MediaRequest {
           .filter(
             (request) =>
               request.is4k === requestBody.is4k &&
+              !request.episodes?.length &&
               request.status !== MediaRequestStatus.DECLINED &&
               request.status !== MediaRequestStatus.COMPLETED
           )
@@ -422,15 +469,38 @@ export class MediaRequest {
           ...media.seasons
             .filter(
               (season) =>
-                season[requestBody.is4k ? 'status4k' : 'status'] !==
-                  MediaStatus.UNKNOWN &&
-                season[requestBody.is4k ? 'status4k' : 'status'] !==
-                  MediaStatus.DELETED
+                season[requestBody.is4k ? 'status4k' : 'status'] ===
+                MediaStatus.AVAILABLE
             )
             .map((season) => season.seasonNumber),
         ];
       }
 
+      const finalEpisodes = selectedEpisodes?.filter(
+        (ep, index, all) =>
+          all.findIndex(
+            (other) =>
+              other.seasonNumber === ep.seasonNumber &&
+              other.episodeNumber === ep.episodeNumber
+          ) === index &&
+          !(media.requests ?? []).some(
+            (request) =>
+              request.is4k === requestBody.is4k &&
+              request.status !== MediaRequestStatus.DECLINED &&
+              request.status !== MediaRequestStatus.FAILED &&
+              request.status !== MediaRequestStatus.COMPLETED &&
+              request.episodes?.some(
+                (other) =>
+                  other.seasonNumber === ep.seasonNumber &&
+                  other.episodeNumber === ep.episodeNumber
+              )
+          )
+      );
+      if (finalEpisodes) {
+        requestedSeasons = [
+          ...new Set(finalEpisodes.map((ep) => ep.seasonNumber)),
+        ];
+      }
       const finalSeasons = requestedSeasons.filter(
         (rs) => !existingSeasons.includes(rs)
       );
@@ -481,11 +551,15 @@ export class MediaRequest {
           ? user
           : undefined,
         is4k: requestBody.is4k,
+        manualSearch: requestBody.manualSearch ?? false,
         serverId: requestedServiceId,
         profileId: profileId,
         rootFolder: rootFolder,
         languageProfileId: languageProfileId,
         tags: tags,
+        episodes: finalEpisodes?.filter((ep) =>
+          finalSeasons.includes(ep.seasonNumber)
+        ),
         seasons: finalSeasons.map(
           (sn) =>
             new SeasonRequest({
@@ -555,6 +629,12 @@ export class MediaRequest {
 
   @Column({ type: 'varchar' })
   public type: MediaType;
+
+  @Column({ default: false })
+  public manualSearch: boolean;
+
+  @Column({ type: 'simple-json', nullable: true })
+  public episodes?: { seasonNumber: number; episodeNumber: number }[] | null;
 
   @RelationCount((request: MediaRequest) => request.seasons)
   public seasonCount: number;

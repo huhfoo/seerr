@@ -414,6 +414,9 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
     );
   }
 
+  const showSeasons =
+    !isMovie(title) && !request.episodes?.length && request.seasons.length > 0;
+
   const requestDownloadStatus = getRequestDownloadStatus(
     requestData.media[requestData.is4k ? 'downloadStatus4k' : 'downloadStatus'],
     requestData.type === 'tv'
@@ -495,7 +498,15 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
               >
                 {isMovie(title) ? title.title : title.name}
               </Link>
-              {!isMovie(title) && request.seasons.length > 0 && (
+              {!!request.episodes?.length && (
+                <div className="my-2 text-sm">
+                  Episodes:{' '}
+                  {request.episodes
+                    .map((ep) => `S${ep.seasonNumber}E${ep.episodeNumber}`)
+                    .join(', ')}
+                </div>
+              )}
+              {showSeasons && (
                 <div className="card-field">
                   <span className="card-field-name">
                     {intl.formatMessage(messages.seasons, {

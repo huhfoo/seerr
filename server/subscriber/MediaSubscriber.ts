@@ -76,7 +76,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
           event.mediaType === MediaType.MOVIE
         ) {
           shouldComplete = true;
-        } else if (event.mediaType === 'tv') {
+        } else if (event.mediaType === 'tv' && !request.episodes?.length) {
           const allSeasonResults: boolean[] = [];
 
           // Sequential on purpose as these saves share the transaction's connection

@@ -1,4 +1,5 @@
 import ExternalAPI from '@server/api/externalapi';
+import type { ReleaseResult } from '@server/interfaces/api/releaseInterfaces';
 import type { AvailableCacheIds } from '@server/lib/cache';
 import cacheManager from '@server/lib/cache';
 import { getSettings, type DVRSettings } from '@server/lib/settings';
@@ -112,6 +113,43 @@ class ServarrBase<QueueItemAppendT> extends ExternalAPI {
     );
 
     this.apiName = apiName;
+  }
+
+  public async getReleases(params: {
+    movieId?: number;
+    seriesId?: number;
+    episodeId?: number;
+    seasonNumber?: number;
+  }): Promise<ReleaseResult[]> {
+    const { data } = await this.axios.get<ReleaseResult[]>('/release', {
+      params,
+      timeout: Math.max(this.axios.defaults.timeout ?? 0, 120000),
+    });
+    // Return display fields only; upstream download URLs can contain indexer credentials.
+    return data.map((release) => ({
+      guid: release.guid,
+      indexerId: release.indexerId,
+      title: release.title,
+      releaseGroup: release.releaseGroup,
+      customFormatScore: release.customFormatScore,
+      customFormats: release.customFormats?.map(({ id, name }) => ({
+        id,
+        name,
+      })),
+      indexer: release.indexer,
+      size: release.size,
+      protocol: release.protocol,
+      quality: release.quality,
+      seeders: release.seeders,
+      leechers: release.leechers,
+      age: release.age,
+      rejected: release.rejected,
+      rejections: release.rejections,
+    }));
+  }
+
+  public async grabRelease(guid: string, indexerId: number): Promise<void> {
+    await this.axios.post('/release', { guid, indexerId });
   }
 
   public getSystemStatus = async (): Promise<SystemStatus> => {
