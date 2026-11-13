@@ -1,4 +1,4 @@
-> This fork adds individual episode requests, so you can request a pilot or any episode without requesting the whole season.
+> Based on Seerr [v3.5.2](https://github.com/seerr-team/seerr/releases/tag/v3.5.2), this fork adds individual episode requests, so you can request a pilot or any episode without requesting the whole season.
 
 <p align="center">
 <img src="./public/logo_full.svg" alt="Seerr" style="margin: 20px 0;">
